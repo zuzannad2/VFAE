@@ -1,5 +1,7 @@
 import torch
-from torch.nn import Module, Linear, ReLU, Dropout
+from torch.nn import Module, Linear, ReLU, Dropout, Sigmoid
+from torch.utils.data import Dataset
+from loss import VFAE_loss
 
 class MLP(Module):
     '''
@@ -13,8 +15,7 @@ class MLP(Module):
         
     def forward(self, inputs):
         output = self.activation(self.fc1(inputs))
-        output = self.fc2(output)
-        return output
+        return self.fc2(output)
 
 class VariationalMLP(Module):
     '''
@@ -28,13 +29,11 @@ class VariationalMLP(Module):
         self.fc_mean = Linear(hidden_dim, z_dim)
 
     def forward(self, inputs):
-        outputs = self.encoder(inputs)
-        logvar = (0.5 * self.fc_logvar(outputs)).exp()
+        outputs = self.fc1(inputs)
+        logvar = self.fc_logvar(outputs).mul(.5).exp()
         mean = self.fc_mean(outputs)
-
         eps = torch.randn_like(mean) 
-        z = eps * mean + logvar
-        
+        z = eps * logvar + mean
         return z, logvar, mean
 
 class VFAE(Module):
@@ -54,41 +53,41 @@ class VFAE(Module):
         dropout) -> None:
         
         super().__init__()
-        self.activation = ReLU()
+        self.activation = Sigmoid()
+        dim_y_tmp = 2 if dim_y == 1 else dim_y
 
         self.encoder_z1 = VariationalMLP(dim_x+dim_s, dim_z1_enc, dim_z, self.activation)
         self.encoder_z2 = VariationalMLP(dim_z+dim_y, dim_z2_enc, dim_z, self.activation)
 
         self.decoder_z1 = VariationalMLP(dim_z+dim_y, dim_z1_dec, dim_z, self.activation)
-        self.decoder_x = MLP(dim_z, dim_x_dec, dim_y, self.activation)
-        self.decoder_y = MLP(dim_z+dim_s, dim_x_dec, dim_x+dim_s, self.activation)
+        self.decoder_y = MLP(dim_z, dim_x_dec, dim_y_tmp, self.activation)
+        self.decoder_x = MLP(dim_z+dim_s, dim_x_dec, dim_x+dim_s, self.activation)
 
         self.dropout = Dropout(dropout)
 
     def forward(self, inputs):
-        x, y, s = inputs['x'], inputs['y'], inputs['z'] 
-
+        x, y, s = inputs['x'], inputs['y'], inputs['s'] 
         # Encode
         x_s = torch.cat([x,s], dim=1)
         x_s = self.dropout(x_s)
-        z1_enc, z1_enc_logvar, z1_enc_mean = self.encoder_z1(x_s)
 
-        z_y = torch.cat([z1_enc,y], axis=1)
-        z2_enc, z2_enc_logvar, z2_enc_mean = self.encoder_z2(z_y)
+        z1_enc, z1_enc_logvar, z1_enc_mean = self.encoder_z1(x_s)
+        z1_y = torch.cat([z1_enc,y], dim=1)
+        z2_enc, z2_enc_logvar, z2_enc_mean = self.encoder_z2(z1_y)
 
         # Decode
-        z_y = torch.cat([z2_enc, y], axis=1)
-        z1_dec, z1_dec_logvar, z1_dec_mean = self.decoder_z1(z_y)
+        z2_y = torch.cat([z2_enc, y], dim=1)
+        z1_dec, z1_dec_logvar, z1_dec_mean = self.decoder_z1(z2_y)
 
-        z1_s = torch.cat([z1_dec, s], axis=1)
+        z1_s = torch.cat([z1_dec, s], dim=1)
         x_dec = self.decoder_x(z1_s)
 
         y_dec = self.decoder_y(z1_enc)
-
+        
         out = {
             'x_pred' : x_dec, 
             'y_pred' : y_dec, 
-            'z1_pred' : z1_dec,
+            'z1_enc' : z1_enc,
 
             'z1_enc_logvar': z1_enc_logvar, 
             'z1_enc_mean': z1_enc_mean, 
@@ -99,9 +98,37 @@ class VFAE(Module):
             'z1_dec_logvar': z1_dec_logvar,
             'z1_dec_mean': z1_dec_mean
         }
-
         return out
 
 
-    
+def train(epoch, model, train_dataloader, loss_function, optimizer, print_freq = 50):
+    model.train()
+    running_loss = 0
+    count = 0
 
+    for batch_id, data in enumerate(train_dataloader):
+        preds_dict = model(data)
+        loss = loss_function(data, preds_dict)
+
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss
+        count += data['x'].size(0)
+
+        if batch_id % print_freq == 0:
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                epoch, batch_id * data['x'].size(0), len(train_dataloader.dataset), 100. * batch_id / len(train_dataloader), loss))
+    
+    running_loss /= count
+    print('\nTrain Epoch: {} Average loss: {:.4f}'.format(epoch, running_loss))
+
+class DictionaryDataset(Dataset):
+    def __init__(self, dict):
+        self.dict = dict
+
+    def __len__(self):
+        return self.dict['x'].shape[0]
+
+    def __getitem__(self, index):
+        return {'x': self.dict['x'][index], 's': self.dict['s'][index], 'y': self.dict['y'][index]}

@@ -2,9 +2,9 @@ import torch
 import numpy as np
 from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss
 
-class Fast_MMD():
-    
+class Fast_MMD(torch.nn.Module):
     def __init__(self, gamma, features_out) -> None:
+        super().__init__()
         self.gamma = gamma
         self.features_out = features_out
 
@@ -22,9 +22,9 @@ class Fast_MMD():
     def psi(self, x, w, b):
         return np.sqrt(2 / self.features_out) * (np.sqrt(2 / self.gamma) * (x @ w + b)).cos()
 
-class VFAE_loss():
-
-    def __init__(self, alpha, beta, gamma, dims_out) -> None:
+class VFAE_loss(torch.nn.Module):
+    def __init__(self, alpha, beta, gamma, dims_out):
+        super().__init__()
         self.alpha = alpha 
         self.beta = beta
 
@@ -35,27 +35,34 @@ class VFAE_loss():
     def forward(self, y_true, y_pred):
         x, s, y = y_true['x'], y_true['s'], y_true['y']
         x_s = torch.cat([x, s], dim=-1)
+        
+        y = y.type(torch.LongTensor).reshape(y.size(0))
 
+        
         supervised_loss = self.ce_loss(y_pred['y_pred'], y)
         reconstruction_loss = self.bce_loss(y_pred['x_pred'], x_s)
 
         zeros = torch.zeros_like(y_pred['z1_enc_logvar'])
-        kl_loss_z1 = self.kl_divergence(y_pred['z1_enc_logvar'], y_pred['z1_dec_logvar'],  y_pred['z1_enc_mu'], y_pred['z1_dec_mu'])
-        kl_loss_z2 = self.kl_divergence(y_pred['z2_enc_logvar'], y_pred['z2_enc_mu'], zeros, zeros)
-        
+        kl_loss_z1 = self.kl_divergence(y_pred['z1_enc_logvar'], y_pred['z1_dec_logvar'],  y_pred['z1_enc_mean'], y_pred['z1_dec_mean'])
+        kl_loss_z2 = self.kl_divergence(y_pred['z2_enc_logvar'], y_pred['z2_enc_mean'], zeros, zeros)
+
         vfae_loss = supervised_loss + kl_loss_z1 + kl_loss_z2 + self.alpha * reconstruction_loss
 
-        z1_encoded = y_pred['z1_enc']
-        z1_sensitive, z1_nonsensitive = self.separate_sensitive(z1_encoded, s)
-        vfae_loss += self.beta * self.mmd(z1_sensitive, z1_nonsensitive)
-        
+        # z1_encoded = y_pred['z1_enc']
+        # z1_sensitive, z1_nonsensitive = self.separate_sensitive(z1_encoded, s)
+        # if len(z1_sensitive) > 0:
+        #     vfae_loss += self.beta * self.mmd(z1_sensitive, z1_nonsensitive)
+
         return vfae_loss
 
 
     @staticmethod
     def kl_divergence(logvar_z1, logvar_z2, mu_z1, mu_z2):
-        kl = 0.5 * torch.sum(logvar_z1 - logvar_z2 + (logvar_z1.exp() + (mu_z1 - mu_z2)**2) / logvar_z2.exp(), dim=1)
+
+        per_example_kl = logvar_z2 - logvar_z1 - 1 + (logvar_z1.exp() + (mu_z1 - mu_z2).square()) / logvar_z2.exp()
+        kl = 0.5 * torch.sum(per_example_kl, dim=1)
         return kl.mean()
+
     
     @staticmethod
     def separate_sensitive(variables, s):
