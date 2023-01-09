@@ -1,7 +1,5 @@
 import torch
 from torch.nn import Module, Linear, ReLU, Dropout, Sigmoid
-from torch.utils.data import Dataset
-from loss import VFAE_loss
 
 class MLP(Module):
     '''
@@ -34,6 +32,7 @@ class VariationalMLP(Module):
         mean = self.fc_mean(outputs)
         eps = torch.randn_like(mean) 
         z = eps * logvar + mean
+        
         return z, logvar, mean
 
 class VFAE(Module):
@@ -102,14 +101,13 @@ class VFAE(Module):
 
 
 def train(epoch, model, train_dataloader, loss_function, optimizer, print_freq = 50):
-    model.train()
+    #model.train()
     running_loss = 0
     count = 0
-
+    
     for batch_id, data in enumerate(train_dataloader):
         preds_dict = model(data)
         loss = loss_function(data, preds_dict)
-
         loss.backward()
         optimizer.step()
 
@@ -121,14 +119,6 @@ def train(epoch, model, train_dataloader, loss_function, optimizer, print_freq =
                 epoch, batch_id * data['x'].size(0), len(train_dataloader.dataset), 100. * batch_id / len(train_dataloader), loss))
     
     running_loss /= count
-    print('\nTrain Epoch: {} Average loss: {:.4f}'.format(epoch, running_loss))
+    print('Train Epoch: {} Average loss: {:.4f}'.format(epoch, running_loss))
 
-class DictionaryDataset(Dataset):
-    def __init__(self, dict):
-        self.dict = dict
-
-    def __len__(self):
-        return self.dict['x'].shape[0]
-
-    def __getitem__(self, index):
-        return {'x': self.dict['x'][index], 's': self.dict['s'][index], 'y': self.dict['y'][index]}
+    return running_loss
