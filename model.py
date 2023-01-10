@@ -112,7 +112,7 @@ def train(epoch, model, train_dataloader, loss_function, optimizer, print_freq =
         optimizer.step()
 
         running_loss += loss
-        count += data['x'].size(0)
+        count += 1
 
         if batch_id % print_freq == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(

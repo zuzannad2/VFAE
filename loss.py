@@ -37,15 +37,15 @@ class VFAE_loss(torch.nn.Module):
         x_s = torch.cat([x, s], dim=-1)
         
         y = y.type(torch.LongTensor).reshape(y.size(0))
-
+    
         supervised_loss = self.ce_loss(y_pred['y_pred'], y)
         reconstruction_loss = self.bce_loss(y_pred['x_pred'], x_s)
-
+        
         zeros = torch.zeros_like(y_pred['z1_enc_logvar'])
         kl_loss_z1 = self.kl_divergence(y_pred['z1_enc_logvar'], y_pred['z1_dec_logvar'],  y_pred['z1_enc_mean'], y_pred['z1_dec_mean'])
         kl_loss_z2 = self.kl_divergence(y_pred['z2_enc_logvar'], y_pred['z2_enc_mean'], zeros, zeros)
 
-        vfae_loss = supervised_loss + kl_loss_z1 + kl_loss_z2 + self.alpha * reconstruction_loss
+        vfae_loss = self.alpha * supervised_loss + kl_loss_z1 +  kl_loss_z2 + reconstruction_loss
 
         z1_encoded = y_pred['z1_enc']
         z1_sensitive, z1_nonsensitive = self.separate_sensitive(z1_encoded, s)

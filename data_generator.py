@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 
-class Test():
+class DataGen():
     def __init__(self, model, ckpt_path) -> None:
         '''
         :params:
@@ -16,21 +16,14 @@ class Test():
         self.model.eval()
 
     def __call__(self, dataloader):
-        true = np.empty(len(dataloader))
-        preds = np.empty(len(dataloader))
         with torch.no_grad():
             for data in dataloader:
                 output = self.model(data)
+
                 pred = torch.nn.functional.softmax(output['y_pred'], dim=1)
                 pred = pred.argmax(1, keepdim=True)
-                np.append(preds, pred)
-                np.append(true, data['y'].item())
-        return self.metrics(true, preds)
+                output['y_pred'] = pred
+
+        return output
     
-    @staticmethod
-    def metrics(true, pred):
-        accuracy = accuracy_score(true, pred)
-        precision, recall, fscore, _ = precision_recall_fscore_support(true, pred, average='weighted') 
-        # TODO: Change this to a suitable one
-        return accuracy, precision, recall, fscore
 
